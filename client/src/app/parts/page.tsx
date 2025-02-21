@@ -58,6 +58,8 @@ export default function PartsPage() {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [updatingOrder, setUpdatingOrder] = useState<string | null>(null);
   const [isClosedOrdersVisible, setIsClosedOrdersVisible] = useState(false);
+  const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
+  const [isBulkAbandoning, setIsBulkAbandoning] = useState(false);
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -130,6 +132,43 @@ export default function PartsPage() {
     }
   };
 
+  const handleBulkAbandon = async () => {
+    if (!user || selectedOrders.size === 0) return;
+    
+    try {
+      setIsBulkAbandoning(true);
+      
+      const updatePromises = Array.from(selectedOrders).map(orderId => 
+        updateDoc(doc(db, 'open-orders', orderId), {
+          status: 'closed',
+          closureReason: 'abandoned',
+          updatedAt: new Date()
+        })
+      );
+
+      await Promise.all(updatePromises);
+
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          selectedOrders.has(order.id)
+            ? { 
+                ...order, 
+                status: 'closed' as const,
+                closureReason: 'abandoned' as const,
+                updatedAt: new Date() 
+              }
+            : order
+        )
+      );
+
+      setSelectedOrders(new Set());
+    } catch (error) {
+      console.error('Error abandoning orders:', error);
+    } finally {
+      setIsBulkAbandoning(false);
+    }
+  };
+
   const getOrdersByStatus = (orders: Order[]) => {
     return orders.reduce<{ active: Order[]; closed: Order[] }>(
       (acc, order) => {
@@ -185,39 +224,91 @@ export default function PartsPage() {
 
   const renderOrdersList = (orders: Order[], title: string) => (
     <>
-      <h2 className="text-2xl font-semibold mb-4">{title}</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-semibold">{title}</h2>
+        {selectedOrders.size > 0 && (
+          <button
+            onClick={handleBulkAbandon}
+            disabled={isBulkAbandoning}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isBulkAbandoning ? (
+              <>
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Abandoning {selectedOrders.size} orders...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Abandon {selectedOrders.size} orders
+              </>
+            )}
+          </button>
+        )}
+      </div>
       <div className="space-y-4 mb-8">
         {orders.map((order) => (
           <div
             key={order.id}
             className="bg-white dark:bg-slate-800 rounded-xl shadow-lg overflow-hidden"
           >
-            <div 
-              className="p-6 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-              onClick={() => toggleOrderExpansion(order.id)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <h2 className="text-xl font-semibold">{order.orderNumber}</h2>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[order.status]}`}>
-                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                  </span>
-                  {order.status === 'closed' && order.closureReason && (
-                    <span className={`text-sm font-medium ${closureReasonConfig[order.closureReason].color}`}>
-                      {closureReasonConfig[order.closureReason].label}
-                    </span>
-                  )}
+            <div className="p-6">
+              <div className="flex items-center gap-4">
+                {(order.status === 'pending' || order.status === 'approved') && (
+                  <div 
+                    className="flex-shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedOrders.has(order.id)}
+                      onChange={(e) => {
+                        setSelectedOrders(prev => {
+                          const newSet = new Set(prev);
+                          if (e.target.checked) {
+                            newSet.add(order.id);
+                          } else {
+                            newSet.delete(order.id);
+                          }
+                          return newSet;
+                        });
+                      }}
+                      className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+                <div 
+                  className="flex-grow cursor-pointer"
+                  onClick={() => toggleOrderExpansion(order.id)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <h2 className="text-xl font-semibold">{order.orderNumber}</h2>
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[order.status]}`}>
+                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </span>
+                      {order.status === 'closed' && order.closureReason && (
+                        <span className={`text-sm font-medium ${closureReasonConfig[order.closureReason].color}`}>
+                          {closureReasonConfig[order.closureReason].label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                      {new Date(order.createdAt.seconds * 1000).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    {order.items.length} item{order.items.length !== 1 ? 's' : ''}
+                  </div>
                 </div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">
-                  {new Date(order.createdAt.seconds * 1000).toLocaleDateString()}
-                </div>
-              </div>
-              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                {order.items.length} item{order.items.length !== 1 ? 's' : ''}
               </div>
             </div>
 
-            {/* Order Details */}
             {expandedOrders.has(order.id) && (
               <div className="border-t border-slate-200 dark:border-slate-700 p-6">
                 <div className="space-y-4">
@@ -262,7 +353,6 @@ export default function PartsPage() {
                   ))}
                 </div>
                 
-                {/* Order Actions */}
                 {renderOrderActions(order)}
               </div>
             )}
@@ -330,7 +420,6 @@ export default function PartsPage() {
                     </div>
                   </div>
 
-                  {/* Order Details */}
                   {expandedOrders.has(order.id) && (
                     <div className="border-t border-slate-200 dark:border-slate-700 p-6">
                       <div className="space-y-4">
@@ -375,7 +464,6 @@ export default function PartsPage() {
                         ))}
                       </div>
                       
-                      {/* Order Actions */}
                       {renderOrderActions(order)}
                     </div>
                   )}
