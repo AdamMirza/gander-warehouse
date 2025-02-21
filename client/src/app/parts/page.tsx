@@ -293,32 +293,31 @@ export default function PartsPage() {
       <div className="container mx-auto">
         <h1 className="text-3xl font-bold mb-6">Manage Orders</h1>
 
-        {orders.length === 0 ? (
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 text-center">
-            <p className="text-slate-600 dark:text-slate-300 mb-4">
-              No orders found. Start by creating a new order.
-            </p>
-            <Link
-              href="/parts/create"
-              className="inline-block px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              Create New Order
-            </Link>
-          </div>
-        ) : (
-          <div>
-            {/* Split and render orders by status */}
-            {(() => {
-              const { active, closed } = getOrdersByStatus(orders);
-              return (
-                <>
-                  {active.length > 0 && renderOrdersList(active, 'Active Orders')}
-                  {closed.length > 0 && renderOrdersList(closed, 'Closed Orders')}
-                </>
-              );
-            })()}
-          </div>
-        )}
+        <div>
+          {(() => {
+            const { active, closed } = getOrdersByStatus(orders);
+            return (
+              <>
+                {active.length > 0 ? (
+                  renderOrdersList(active, 'Active Orders')
+                ) : (
+                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 text-center mb-8">
+                    <p className="text-slate-600 dark:text-slate-300 mb-4">
+                      No open orders found. Start by creating a new order.
+                    </p>
+                    <Link
+                      href="/parts/create"
+                      className="inline-block px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                    >
+                      Create New Order
+                    </Link>
+                  </div>
+                )}
+                {closed.length > 0 && renderOrdersList(closed, 'Closed Orders')}
+              </>
+            );
+          })()}
+        </div>
       </div>
     </div>
   );
