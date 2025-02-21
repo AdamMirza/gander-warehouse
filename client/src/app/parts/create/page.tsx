@@ -277,11 +277,20 @@ export default function CreateOrderPage() {
         max={maxQuantity}
         value={currentPart.quantity}
         onChange={(e) => {
-          const value = parseInt(e.target.value);
-          if (value > maxQuantity) {
+          const value = e.target.value === '' ? 1 : parseInt(e.target.value);
+          if (isNaN(value)) {
+            setCurrentPart(prev => ({ ...prev, quantity: 1 }));
+          } else if (value > maxQuantity) {
             setCurrentPart(prev => ({ ...prev, quantity: maxQuantity }));
           } else {
             setCurrentPart(prev => ({ ...prev, quantity: value }));
+          }
+        }}
+        onBlur={(e) => {
+          // Ensure we have a valid number when the input loses focus
+          const value = parseInt(e.target.value);
+          if (isNaN(value) || value < 1) {
+            setCurrentPart(prev => ({ ...prev, quantity: 1 }));
           }
         }}
         className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800"
