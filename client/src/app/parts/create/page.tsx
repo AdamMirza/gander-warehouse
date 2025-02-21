@@ -1,6 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useDebounce } from '@/hooks/useDebounce';
+
+interface FirestorePart {
+  id: string;
+  partNumber: string;
+  name: string;
+  description: string;
+  manufacturer: string;
+  condition: string;
+  quantityAvailable: number;
+  image?: string;
+}
 
 interface Part {
   id: string;
@@ -61,6 +75,68 @@ export default function CreateOrderPage() {
     condition: 'New',
     quantity: 1,
   });
+  
+  const [searchResults, setSearchResults] = useState<FirestorePart[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const debouncedSearch = useDebounce(currentPart.partNumber, 300);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Search parts in Firestore
+  useEffect(() => {
+    const searchParts = async () => {
+      if (!debouncedSearch.trim()) {
+        setSearchResults([]);
+        setIsSearching(false);
+        return;
+      }
+
+      setIsSearching(true);
+      try {
+        const partsRef = collection(db, 'parts');
+        const q = query(
+          partsRef,
+          where('partNumber', '>=', debouncedSearch.toUpperCase()),
+          where('partNumber', '<=', debouncedSearch.toUpperCase() + '\uf8ff'),
+          limit(5)
+        );
+
+        const querySnapshot = await getDocs(q);
+        const results = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as FirestorePart));
+
+        setSearchResults(results);
+      } catch (error) {
+        console.error('Error searching parts:', error);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+
+    searchParts();
+  }, [debouncedSearch]);
+
+  const handleSelectPart = (part: FirestorePart) => {
+    setCurrentPart(prev => ({
+      ...prev,
+      partNumber: part.partNumber,
+    }));
+    setShowDropdown(false);
+  };
 
   const handleAddPart = () => {
     if (!currentPart.partNumber || !currentPart.ataChapter) return;
@@ -96,22 +172,73 @@ export default function CreateOrderPage() {
       <div className="container mx-auto max-w-4xl">
         <h1 className="text-3xl font-bold mb-6">Create New Order</h1>
 
-        {/* Part Entry Form */}
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">Add Parts to Order</h2>
           <div className="space-y-4">
-            {/* Part Number Row */}
-            <div>
+            {/* Part Number Search */}
+            <div ref={searchRef} className="relative">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Part Number
               </label>
               <input
                 type="text"
                 value={currentPart.partNumber}
-                onChange={(e) => setCurrentPart({ ...currentPart, partNumber: e.target.value })}
+                onChange={(e) => {
+                  setCurrentPart({ ...currentPart, partNumber: e.target.value });
+                  setShowDropdown(true);
+                }}
+                onFocus={() => setShowDropdown(true)}
                 className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800"
-                placeholder="Enter part number"
+                placeholder="Search or enter part number"
               />
+              
+              {/* Search Results Dropdown */}
+              {showDropdown && (currentPart.partNumber || isSearching) && (
+                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 max-h-64 overflow-y-auto">
+                  {isSearching ? (
+                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                      Searching...
+                    </div>
+                  ) : searchResults.length > 0 ? (
+                    searchResults.map((part) => (
+                      <button
+                        key={part.id}
+                        onClick={() => handleSelectPart(part)}
+                        className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors border-b last:border-b-0 border-slate-100 dark:border-slate-700"
+                      >
+                        <div className="flex items-start">
+                          {part.image && (
+                            <img
+                              src={part.image}
+                              alt={part.name}
+                              className="w-12 h-12 object-cover rounded mr-3"
+                            />
+                          )}
+                          <div>
+                            <div className="font-medium text-slate-900 dark:text-white">
+                              {part.partNumber}
+                            </div>
+                            <div className="text-sm text-slate-500 dark:text-slate-400">
+                              {part.name}
+                            </div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500">
+                              {part.manufacturer} • {part.quantityAvailable} available
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  ) : currentPart.partNumber ? (
+                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                      No matching parts found. You can still use this part number.
+                    </div>
+                  ) : (
+                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                      Start typing to search for parts
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* ATA Chapter and Condition Row */}
