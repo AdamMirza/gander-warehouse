@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { collection, query, where, orderBy, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, updateDoc, doc, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Link from 'next/link';
 
@@ -107,12 +107,49 @@ export default function PartsPage() {
     
     try {
       setUpdatingOrder(orderId);
-      await updateDoc(doc(db, 'open-orders', orderId), {
-        status: 'closed',
-        closureReason: 'abandoned',
-        updatedAt: new Date()
+      
+      // Get the order we're abandoning
+      const orderToAbandon = orders.find(order => order.id === orderId);
+      if (!orderToAbandon) return;
+
+      await runTransaction(db, async (transaction) => {
+        // Get all non-custom parts that need inventory restoration
+        const inventoryUpdates = orderToAbandon.items
+          .filter(item => !item.isCustomPart && item.inventoryId)
+          .map(async (item) => {
+            const inventoryRef = doc(db, 'inventory', item.inventoryId!);
+            const inventorySnap = await transaction.get(inventoryRef);
+            
+            if (!inventorySnap.exists()) return null;
+
+            return {
+              ref: inventoryRef,
+              currentCount: inventorySnap.data().count,
+              quantityToRestore: item.quantity
+            };
+          });
+
+        const inventoryDocs = await Promise.all(inventoryUpdates);
+
+        // Update the order status
+        const orderRef = doc(db, 'open-orders', orderId);
+        transaction.update(orderRef, {
+          status: 'closed',
+          closureReason: 'abandoned',
+          updatedAt: new Date()
+        });
+
+        // Restore inventory counts
+        inventoryDocs.forEach(doc => {
+          if (doc) {
+            transaction.update(doc.ref, {
+              count: doc.currentCount + doc.quantityToRestore
+            });
+          }
+        });
       });
 
+      // Update local state
       setOrders(prevOrders => 
         prevOrders.map(order => 
           order.id === orderId 
@@ -127,6 +164,7 @@ export default function PartsPage() {
       );
     } catch (error) {
       console.error('Error abandoning order:', error);
+      alert('There was an error abandoning the order. Please try again.');
     } finally {
       setUpdatingOrder(null);
     }
@@ -138,16 +176,49 @@ export default function PartsPage() {
     try {
       setIsBulkAbandoning(true);
       
-      const updatePromises = Array.from(selectedOrders).map(orderId => 
-        updateDoc(doc(db, 'open-orders', orderId), {
-          status: 'closed',
-          closureReason: 'abandoned',
-          updatedAt: new Date()
-        })
-      );
+      for (const orderId of selectedOrders) {
+        const orderToAbandon = orders.find(order => order.id === orderId);
+        if (!orderToAbandon) continue;
 
-      await Promise.all(updatePromises);
+        await runTransaction(db, async (transaction) => {
+          // Get all non-custom parts that need inventory restoration
+          const inventoryUpdates = orderToAbandon.items
+            .filter(item => !item.isCustomPart && item.inventoryId)
+            .map(async (item) => {
+              const inventoryRef = doc(db, 'inventory', item.inventoryId!);
+              const inventorySnap = await transaction.get(inventoryRef);
+              
+              if (!inventorySnap.exists()) return null;
 
+              return {
+                ref: inventoryRef,
+                currentCount: inventorySnap.data().count,
+                quantityToRestore: item.quantity
+              };
+            });
+
+          const inventoryDocs = await Promise.all(inventoryUpdates);
+
+          // Update the order status
+          const orderRef = doc(db, 'open-orders', orderId);
+          transaction.update(orderRef, {
+            status: 'closed',
+            closureReason: 'abandoned',
+            updatedAt: new Date()
+          });
+
+          // Restore inventory counts
+          inventoryDocs.forEach(doc => {
+            if (doc) {
+              transaction.update(doc.ref, {
+                count: doc.currentCount + doc.quantityToRestore
+              });
+            }
+          });
+        });
+      }
+
+      // Update local state
       setOrders(prevOrders => 
         prevOrders.map(order => 
           selectedOrders.has(order.id)
@@ -164,6 +235,7 @@ export default function PartsPage() {
       setSelectedOrders(new Set());
     } catch (error) {
       console.error('Error abandoning orders:', error);
+      alert('There was an error abandoning the orders. Please try again.');
     } finally {
       setIsBulkAbandoning(false);
     }

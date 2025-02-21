@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, getDocs, limit, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, addDoc, serverTimestamp, runTransaction, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useAuth } from '@/context/AuthContext';
@@ -256,23 +256,59 @@ export default function CreateOrderPage() {
     }
 
     try {
-      const orderItems: OrderItem[] = await Promise.all(
-        parts.map(async (part) => {
+      // Use a transaction to ensure inventory updates are atomic
+      await runTransaction(db, async (transaction) => {
+        // First, verify inventory availability and get latest counts
+        const inventoryChecks = await Promise.all(
+          parts.map(async (part) => {
+            const partRef = searchResults.find(p => p.partNumber === part.partNumber);
+            if (!partRef) return null; // Custom part, no inventory to check
+
+            // Get the current inventory document
+            const inventoryQuery = query(
+              collection(db, 'inventory'),
+              where('partId', '==', partRef.id),
+              where('condition', '==', part.condition)
+            );
+            const inventorySnapshot = await getDocs(inventoryQuery);
+            const inventoryDoc = inventorySnapshot.docs[0];
+
+            if (!inventoryDoc) return null; // No inventory found
+            return {
+              id: inventoryDoc.id,
+              currentCount: inventoryDoc.data().count,
+              requestedCount: part.quantity,
+              ref: inventoryDoc.ref
+            };
+          })
+        );
+
+        // Verify we have enough inventory for all parts
+        const insufficientInventory = inventoryChecks.find(
+          check => check && check.currentCount < check.requestedCount
+        );
+
+        if (insufficientInventory) {
+          throw new Error('Insufficient inventory available');
+        }
+
+        // Create the order document
+        const orderRef = doc(collection(db, 'open-orders'));
+        const orderItems: OrderItem[] = parts.map((part) => {
           const orderItem: OrderItem = {
             partNumber: part.partNumber,
             ataChapter: part.ataChapter,
             condition: part.condition,
             quantity: part.quantity,
-            isCustomPart: true // Default to true, will be updated below if it's a database part
+            isCustomPart: true
           };
 
-          // Check if this is a database part
           const partRef = searchResults.find(p => p.partNumber === part.partNumber);
           if (partRef) {
             orderItem.isCustomPart = false;
             orderItem.partId = partRef.id;
-
-            // Find the matching inventory for this condition
+            
+            // Find matching inventory
             const inventory = selectedPartInventory.find(
               inv => inv.condition === part.condition
             );
@@ -282,23 +318,32 @@ export default function CreateOrderPage() {
           }
 
           return orderItem;
-        })
-      );
+        });
 
-      const order: Omit<Order, 'id'> = {
-        userId: user.uid,
-        userEmail: user.email || '',
-        status: 'pending',
-        orderNumber: generateOrderNumber(),
-        items: orderItems,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
+        const order: Omit<Order, 'id'> = {
+          userId: user.uid,
+          userEmail: user.email || '',
+          status: 'pending',
+          orderNumber: generateOrderNumber(),
+          items: orderItems,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
 
-      const orderRef = await addDoc(collection(db, 'open-orders'), order);
-      console.log('Order submitted successfully:', orderRef.id);
+        // Set the order document
+        transaction.set(orderRef, order);
 
-      // Reset the form
+        // Update inventory counts
+        inventoryChecks.forEach(check => {
+          if (check) {
+            transaction.update(check.ref, {
+              count: check.currentCount - check.requestedCount
+            });
+          }
+        });
+      });
+
+      // Reset the form after successful submission
       setParts([]);
       setCurrentPart({
         partNumber: '',
@@ -313,6 +358,11 @@ export default function CreateOrderPage() {
     } catch (error) {
       console.error('Error submitting order:', error);
       // You might want to show an error message here
+      if (error instanceof Error && error.message === 'Insufficient inventory available') {
+        alert('Some items in your order are no longer available in the requested quantity.');
+      } else {
+        alert('There was an error submitting your order. Please try again.');
+      }
     }
   };
 
