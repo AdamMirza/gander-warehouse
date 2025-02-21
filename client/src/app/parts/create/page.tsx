@@ -113,6 +113,7 @@ export default function CreateOrderPage() {
   const [availableConditions, setAvailableConditions] = useState<string[]>([]);
   const [selectedPartInventory, setSelectedPartInventory] = useState<InventoryItem[]>([]);
   const [isCustomPart, setIsCustomPart] = useState(false);
+  const [reservedQuantities, setReservedQuantities] = useState<Record<string, number>>({});
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -218,6 +219,66 @@ export default function CreateOrderPage() {
   const handleAddPart = () => {
     if (!currentPart.partNumber || !currentPart.ataChapter) return;
 
+    // Check if this part already exists with same condition and ATA chapter
+    const existingPartIndex = parts.findIndex(part => 
+      part.partNumber === currentPart.partNumber &&
+      part.condition === currentPart.condition &&
+      part.ataChapter === currentPart.ataChapter
+    );
+
+    if (existingPartIndex !== -1) {
+      // Calculate new quantity
+      const existingPart = parts[existingPartIndex];
+      let maxQuantity = isCustomPart ? 9999 : 0;
+      
+      if (!isCustomPart) {
+        const inventory = selectedPartInventory.find(inv => inv.condition === currentPart.condition);
+        if (inventory) {
+          const reservedCount = reservedQuantities[inventory.id] || 0;
+          maxQuantity = Math.max(0, inventory.count - reservedCount);
+        }
+      }
+
+      const newQuantity = Math.min(existingPart.quantity + currentPart.quantity, maxQuantity);
+
+      // Update reserved quantities for non-custom parts
+      if (!isCustomPart) {
+        const partRef = searchResults.find(p => p.partNumber === currentPart.partNumber);
+        if (partRef) {
+          const inventory = selectedPartInventory.find(inv => inv.condition === currentPart.condition);
+          if (inventory) {
+            setReservedQuantities(prev => ({
+              ...prev,
+              [inventory.id]: (prev[inventory.id] || 0) + (newQuantity - existingPart.quantity)
+            }));
+          }
+        }
+      }
+
+      // Update the parts array with new quantity
+      setParts(prevParts => {
+        const newParts = [...prevParts];
+        newParts[existingPartIndex] = {
+          ...existingPart,
+          quantity: newQuantity
+        };
+        return newParts;
+      });
+    } else {
+      // Add as new part (existing logic)
+      if (!isCustomPart) {
+        const partRef = searchResults.find(p => p.partNumber === currentPart.partNumber);
+        if (partRef) {
+          const inventory = selectedPartInventory.find(inv => inv.condition === currentPart.condition);
+          if (inventory) {
+            setReservedQuantities(prev => ({
+              ...prev,
+              [inventory.id]: (prev[inventory.id] || 0) + currentPart.quantity
+            }));
+          }
+        }
+      }
+
     setParts([
       ...parts,
       {
@@ -225,6 +286,7 @@ export default function CreateOrderPage() {
         id: crypto.randomUUID(),
       },
     ]);
+    }
 
     // Reset form
     setCurrentPart({
@@ -236,6 +298,19 @@ export default function CreateOrderPage() {
   };
 
   const handleRemovePart = (id: string) => {
+    const partToRemove = parts.find(part => part.id === id);
+    if (partToRemove) {
+      const partRef = searchResults.find(p => p.partNumber === partToRemove.partNumber);
+      if (partRef) {
+        const inventory = selectedPartInventory.find(inv => inv.condition === partToRemove.condition);
+        if (inventory) {
+          setReservedQuantities(prev => ({
+            ...prev,
+            [inventory.id]: Math.max(0, (prev[inventory.id] || 0) - partToRemove.quantity)
+          }));
+        }
+      }
+    }
     setParts(parts.filter(part => part.id !== id));
   };
 
@@ -251,46 +326,40 @@ export default function CreateOrderPage() {
   const handleSubmitOrder = async () => {
     if (!user) return;
     if (parts.length === 0) {
-      // You might want to show an error message here
+      alert('Please add at least one part to your order.');
       return;
     }
 
     try {
-      // Use a transaction to ensure inventory updates are atomic
       await runTransaction(db, async (transaction) => {
         // First, verify inventory availability and get latest counts
-        const inventoryChecks = await Promise.all(
+        const inventoryUpdates = await Promise.all(
           parts.map(async (part) => {
             const partRef = searchResults.find(p => p.partNumber === part.partNumber);
-            if (!partRef) return null; // Custom part, no inventory to check
+            if (!partRef) return null; // Skip custom parts
 
-            // Get the current inventory document
-            const inventoryQuery = query(
-              collection(db, 'inventory'),
-              where('partId', '==', partRef.id),
-              where('condition', '==', part.condition)
-            );
-            const inventorySnapshot = await getDocs(inventoryQuery);
-            const inventoryDoc = inventorySnapshot.docs[0];
+            // Get the inventory document directly using the document reference
+            const inventoryRef = doc(db, 'inventory', selectedPartInventory.find(
+              inv => inv.condition === part.condition && inv.partId === partRef.id
+            )?.id || '');
 
-            if (!inventoryDoc) return null; // No inventory found
+            const inventorySnap = await transaction.get(inventoryRef);
+            if (!inventorySnap.exists()) return null;
+
+            const currentCount = inventorySnap.data().count;
+            
+            if (currentCount < part.quantity) {
+              throw new Error(`Insufficient inventory for part ${part.partNumber}`);
+            }
+
             return {
-              id: inventoryDoc.id,
-              currentCount: inventoryDoc.data().count,
+              ref: inventoryRef,
+              currentCount,
               requestedCount: part.quantity,
-              ref: inventoryDoc.ref
+              partNumber: part.partNumber
             };
           })
         );
-
-        // Verify we have enough inventory for all parts
-        const insufficientInventory = inventoryChecks.find(
-          check => check && check.currentCount < check.requestedCount
-        );
-
-        if (insufficientInventory) {
-          throw new Error('Insufficient inventory available');
-        }
 
         // Create the order document
         const orderRef = doc(collection(db, 'open-orders'));
@@ -320,7 +389,7 @@ export default function CreateOrderPage() {
           return orderItem;
         });
 
-        const order: Omit<Order, 'id'> = {
+        const order = {
           userId: user.uid,
           userEmail: user.email || '',
           status: 'pending',
@@ -334,16 +403,18 @@ export default function CreateOrderPage() {
         transaction.set(orderRef, order);
 
         // Update inventory counts
-        inventoryChecks.forEach(check => {
-          if (check) {
-            transaction.update(check.ref, {
-              count: check.currentCount - check.requestedCount
+        inventoryUpdates.forEach(update => {
+          if (update) {
+            const newCount = update.currentCount - update.requestedCount;
+            console.log(`Updating inventory for ${update.partNumber}: ${update.currentCount} -> ${newCount}`);
+            transaction.update(update.ref, {
+              count: newCount
             });
           }
         });
       });
 
-      // Reset the form after successful submission
+      // Reset form after successful submission
       setParts([]);
       setCurrentPart({
         partNumber: '',
@@ -351,15 +422,14 @@ export default function CreateOrderPage() {
         condition: 'New',
         quantity: 1,
       });
+      setReservedQuantities({});
 
-      // You might want to redirect to an order confirmation page here
-      // or show a success message
+      alert('Order submitted successfully!');
 
     } catch (error) {
       console.error('Error submitting order:', error);
-      // You might want to show an error message here
-      if (error instanceof Error && error.message === 'Insufficient inventory available') {
-        alert('Some items in your order are no longer available in the requested quantity.');
+      if (error instanceof Error) {
+        alert(error.message);
       } else {
         alert('There was an error submitting your order. Please try again.');
       }
@@ -390,7 +460,9 @@ export default function CreateOrderPage() {
         if (!acc[item.condition]) {
           acc[item.condition] = { count: 0, ids: [] };
         }
-        acc[item.condition].count += item.count;
+        // Subtract reserved quantities from available count
+        const reservedCount = reservedQuantities[item.id] || 0;
+        acc[item.condition].count += Math.max(0, item.count - reservedCount);
         acc[item.condition].ids.push(item.id);
         return acc;
       },
@@ -406,7 +478,11 @@ export default function CreateOrderPage() {
       >
         {availableConditions.length > 0 ? (
           Object.entries(groupedInventory).map(([condition, data]) => (
-            <option key={condition} value={condition}>
+            <option 
+              key={condition} 
+              value={condition}
+              disabled={data.count === 0}
+            >
               {condition} ({data.count} available)
             </option>
           ))
@@ -419,8 +495,15 @@ export default function CreateOrderPage() {
 
   // Render quantity input based on whether it's a custom part
   const renderQuantityInput = () => {
-    const maxQuantity = isCustomPart ? 9999 : 
-      selectedPartInventory.find(inv => inv.condition === currentPart.condition)?.count || 1;
+    let maxQuantity = isCustomPart ? 9999 : 0;
+    
+    if (!isCustomPart) {
+      const inventory = selectedPartInventory.find(inv => inv.condition === currentPart.condition);
+      if (inventory) {
+        const reservedCount = reservedQuantities[inventory.id] || 0;
+        maxQuantity = Math.max(0, inventory.count - reservedCount);
+      }
+    }
 
     return (
       <input
@@ -439,7 +522,6 @@ export default function CreateOrderPage() {
           }
         }}
         onBlur={(e) => {
-          // Ensure we have a valid number when the input loses focus
           const value = parseInt(e.target.value);
           if (isNaN(value) || value < 1) {
             setCurrentPart(prev => ({ ...prev, quantity: 1 }));
@@ -525,7 +607,7 @@ export default function CreateOrderPage() {
                               {part.name}
                             </div>
                             <div className="text-xs text-slate-400 dark:text-slate-500">
-                              {part.manufacturer} • {part.quantityAvailable} available
+                              {part.manufacturer} • {selectedPartInventory.reduce((sum, inv) => sum + inv.count, 0)} available
                             </div>
                           </div>
                         </div>
