@@ -37,6 +37,22 @@ const ATA_CHAPTERS = [
   { code: '36', name: 'Pneumatic' },
 ] as const;
 
+const SelectArrowIcon = () => (
+  <svg
+    className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none text-slate-400"
+    fill="none"
+    stroke="currentColor"
+    viewBox="0 0 24 24"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      d="M8 9l4 4 4-4"
+    />
+  </svg>
+);
+
 export default function CreateOrderPage() {
   const [parts, setParts] = useState<Part[]>([]);
   const [currentPart, setCurrentPart] = useState<Omit<Part, 'id'>>({
@@ -104,35 +120,41 @@ export default function CreateOrderPage() {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   ATA Chapter
                 </label>
-                <select
-                  value={currentPart.ataChapter}
-                  onChange={(e) => setCurrentPart({ ...currentPart, ataChapter: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800"
-                >
-                  <option value="">Select ATA Chapter</option>
-                  {ATA_CHAPTERS.map((chapter) => (
-                    <option key={chapter.code} value={chapter.code}>
-                      {chapter.code} - {chapter.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={currentPart.ataChapter}
+                    onChange={(e) => setCurrentPart({ ...currentPart, ataChapter: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800 appearance-none"
+                  >
+                    <option value="">Select ATA Chapter</option>
+                    {ATA_CHAPTERS.map((chapter) => (
+                      <option key={chapter.code} value={chapter.code}>
+                        {chapter.code} - {chapter.name}
+                      </option>
+                    ))}
+                  </select>
+                  <SelectArrowIcon />
+                </div>
               </div>
               <div className="flex gap-4">
                 <div className="flex-1">
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Condition
                   </label>
-                  <select
-                    value={currentPart.condition}
-                    onChange={(e) => setCurrentPart({ ...currentPart, condition: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800"
-                  >
-                    {CONDITIONS.map((condition) => (
-                      <option key={condition} value={condition}>
-                        {condition}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={currentPart.condition}
+                      onChange={(e) => setCurrentPart({ ...currentPart, condition: e.target.value })}
+                      className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800 appearance-none"
+                    >
+                      {CONDITIONS.map((condition) => (
+                        <option key={condition} value={condition}>
+                          {condition}
+                        </option>
+                      ))}
+                    </select>
+                    <SelectArrowIcon />
+                  </div>
                 </div>
                 <div className="w-32">
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
