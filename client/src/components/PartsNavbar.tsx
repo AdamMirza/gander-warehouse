@@ -11,8 +11,8 @@ export default function PartsNavbar() {
   const isActive = (path: string) => pathname === path;
 
   const navLinks = [
-    { href: '/parts/requisition', label: 'Submit Requisition' },
-    { href: '/parts/inventory', label: 'Parts Catalog' },
+    { href: '/parts', label: 'Manage Orders' },
+    { href: '/parts/create', label: 'Create Order' },
   ];
 
   return (
