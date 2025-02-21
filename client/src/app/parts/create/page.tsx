@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useAuth } from '@/context/AuthContext';
 
 interface FirestorePart {
   id: string;
@@ -28,6 +29,27 @@ interface Part {
   ataChapter: string;
   condition: string;
   quantity: number;
+}
+
+interface OrderItem {
+  partNumber: string;
+  ataChapter: string;
+  condition: string;
+  quantity: number;
+  isCustomPart: boolean;
+  partId?: string; // Only present for database parts
+  inventoryId?: string; // Only present for database parts with specific inventory
+}
+
+interface Order {
+  userId: string;
+  userEmail: string;
+  status: 'pending' | 'processing' | 'completed' | 'cancelled';
+  orderNumber: string;
+  items: OrderItem[];
+  createdAt: any; // FirebaseFirestore.Timestamp
+  updatedAt: any; // FirebaseFirestore.Timestamp
+  notes?: string;
 }
 
 const CONDITIONS = [
@@ -74,6 +96,7 @@ const SelectArrowIcon = () => (
 );
 
 export default function CreateOrderPage() {
+  const { user } = useAuth();
   const [parts, setParts] = useState<Part[]>([]);
   const [currentPart, setCurrentPart] = useState<Omit<Part, 'id'>>({
     partNumber: '',
@@ -216,9 +239,81 @@ export default function CreateOrderPage() {
     setParts(parts.filter(part => part.id !== id));
   };
 
-  const handleSubmitOrder = () => {
-    // TODO: Implement order submission
-    console.log('Submitting order with parts:', parts);
+  const generateOrderNumber = () => {
+    const date = new Date();
+    const year = date.getFullYear().toString().slice(-2);
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    return `ORD-${year}${month}${day}-${random}`;
+  };
+
+  const handleSubmitOrder = async () => {
+    if (!user) return;
+    if (parts.length === 0) {
+      // You might want to show an error message here
+      return;
+    }
+
+    try {
+      const orderItems: OrderItem[] = await Promise.all(
+        parts.map(async (part) => {
+          const orderItem: OrderItem = {
+            partNumber: part.partNumber,
+            ataChapter: part.ataChapter,
+            condition: part.condition,
+            quantity: part.quantity,
+            isCustomPart: true // Default to true, will be updated below if it's a database part
+          };
+
+          // Check if this is a database part
+          const partRef = searchResults.find(p => p.partNumber === part.partNumber);
+          if (partRef) {
+            orderItem.isCustomPart = false;
+            orderItem.partId = partRef.id;
+
+            // Find the matching inventory for this condition
+            const inventory = selectedPartInventory.find(
+              inv => inv.condition === part.condition
+            );
+            if (inventory) {
+              orderItem.inventoryId = inventory.id;
+            }
+          }
+
+          return orderItem;
+        })
+      );
+
+      const order: Omit<Order, 'id'> = {
+        userId: user.uid,
+        userEmail: user.email || '',
+        status: 'pending',
+        orderNumber: generateOrderNumber(),
+        items: orderItems,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      const orderRef = await addDoc(collection(db, 'open-orders'), order);
+      console.log('Order submitted successfully:', orderRef.id);
+
+      // Reset the form
+      setParts([]);
+      setCurrentPart({
+        partNumber: '',
+        ataChapter: '',
+        condition: 'New',
+        quantity: 1,
+      });
+
+      // You might want to redirect to an order confirmation page here
+      // or show a success message
+
+    } catch (error) {
+      console.error('Error submitting order:', error);
+      // You might want to show an error message here
+    }
   };
 
   // Render the condition dropdown based on whether it's a custom part or not
