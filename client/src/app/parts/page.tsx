@@ -57,6 +57,7 @@ export default function PartsPage() {
   const [loading, setLoading] = useState(true);
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [updatingOrder, setUpdatingOrder] = useState<string | null>(null);
+  const [isClosedOrdersVisible, setIsClosedOrdersVisible] = useState(false);
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -271,6 +272,122 @@ export default function PartsPage() {
     </>
   );
 
+  const renderClosedOrdersSection = (closedOrders: Order[]) => (
+    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg overflow-hidden">
+      <button
+        onClick={() => setIsClosedOrdersVisible(!isClosedOrdersVisible)}
+        className="w-full p-6 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+      >
+        <h2 className="text-2xl font-semibold">Closed Orders</h2>
+        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+          <span className="text-sm">{closedOrders.length} order{closedOrders.length !== 1 ? 's' : ''}</span>
+          <svg
+            className={`w-5 h-5 transform transition-transform ${isClosedOrdersVisible ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </div>
+      </button>
+      {isClosedOrdersVisible && (
+        <div className="border-t border-slate-200 dark:border-slate-700">
+          <div className="p-6">
+            <div className="space-y-4">
+              {closedOrders.map((order) => (
+                <div
+                  key={order.id}
+                  className="bg-white dark:bg-slate-800 rounded-xl shadow-lg overflow-hidden"
+                >
+                  <div 
+                    className="p-6 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                    onClick={() => toggleOrderExpansion(order.id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-4">
+                        <h2 className="text-xl font-semibold">{order.orderNumber}</h2>
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[order.status]}`}>
+                          {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                        </span>
+                        {order.status === 'closed' && order.closureReason && (
+                          <span className={`text-sm font-medium ${closureReasonConfig[order.closureReason].color}`}>
+                            {closureReasonConfig[order.closureReason].label}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">
+                        {new Date(order.createdAt.seconds * 1000).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      {order.items.length} item{order.items.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+
+                  {/* Order Details */}
+                  {expandedOrders.has(order.id) && (
+                    <div className="border-t border-slate-200 dark:border-slate-700 p-6">
+                      <div className="space-y-4">
+                        {order.items.map((item, index) => (
+                          <div
+                            key={index}
+                            className="grid grid-cols-4 gap-4 p-4 bg-slate-50 dark:bg-slate-700 rounded-lg"
+                          >
+                            <div>
+                              <span className="block text-sm font-medium text-slate-500 dark:text-slate-400">
+                                Part Number
+                              </span>
+                              <span className="text-slate-900 dark:text-white">
+                                {item.partNumber}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-sm font-medium text-slate-500 dark:text-slate-400">
+                                ATA Chapter
+                              </span>
+                              <span className="text-slate-900 dark:text-white">
+                                {item.ataChapter}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-sm font-medium text-slate-500 dark:text-slate-400">
+                                Condition
+                              </span>
+                              <span className="text-slate-900 dark:text-white">
+                                {item.condition}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-sm font-medium text-slate-500 dark:text-slate-400">
+                                Quantity
+                              </span>
+                              <span className="text-slate-900 dark:text-white">
+                                {item.quantity}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {/* Order Actions */}
+                      {renderOrderActions(order)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen pt-24 px-6">
@@ -313,7 +430,7 @@ export default function PartsPage() {
                     </Link>
                   </div>
                 )}
-                {closed.length > 0 && renderOrdersList(closed, 'Closed Orders')}
+                {closed.length > 0 && renderClosedOrdersSection(closed)}
               </>
             );
           })()}
