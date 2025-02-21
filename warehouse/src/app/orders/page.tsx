@@ -19,29 +19,41 @@ interface Order {
 export default function OrdersPage() {
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
   const [closedOrders, setClosedOrders] = useState<Order[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Subscribe to orders collection
+    setLoading(true);
+    setError(null);
+    
     const ordersQuery = query(
       collection(db, 'open-orders'),
     );
 
-    const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
-      const open: Order[] = [];
-      const closed: Order[] = [];
+    const unsubscribe = onSnapshot(ordersQuery, 
+      (snapshot) => {
+        const open: Order[] = [];
+        const closed: Order[] = [];
 
-      snapshot.forEach((doc) => {
-        const order = { id: doc.id, ...doc.data() } as Order;
-        if (order.status === 'closed') {
-          closed.push(order);
-        } else {
-          open.push(order);
-        }
-      });
+        snapshot.forEach((doc) => {
+          const order = { id: doc.id, ...doc.data() } as Order;
+          if (order.status === 'closed') {
+            closed.push(order);
+          } else {
+            open.push(order);
+          }
+        });
 
-      setOpenOrders(open);
-      setClosedOrders(closed);
-    });
+        setOpenOrders(open);
+        setClosedOrders(closed);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching orders:', error);
+        setError('Error loading orders. Please check your connection and permissions.');
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
@@ -54,8 +66,29 @@ export default function OrdersPage() {
       });
     } catch (error) {
       console.error('Error closing order:', error);
+      alert('Failed to close order. Please try again.');
     }
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center min-h-[200px]">
+          <div className="text-lg">Loading orders...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <div className="text-red-700 dark:text-red-200">{error}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
