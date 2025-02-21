@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { 
-  Auth,
   User,
   GoogleAuthProvider,
   signInWithEmailAndPassword,
@@ -10,7 +9,8 @@ import {
   createUserWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '@/lib/firebase';
 
 interface AuthContextType {
   user: User | null;
@@ -23,13 +23,45 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
+const createUserDocument = async (user: User) => {
+  const userRef = doc(db, 'users', user.uid);
+  const userSnap = await getDoc(userRef);
+
+  if (!userSnap.exists()) {
+    const { email, displayName, photoURL } = user;
+    const createdAt = new Date();
+
+    try {
+      await setDoc(userRef, {
+        email,
+        displayName: displayName || email?.split('@')[0] || 'Anonymous',
+        photoURL,
+        createdAt,
+        lastLogin: createdAt,
+      });
+    } catch (error) {
+      console.error('Error creating user document:', error);
+    }
+  } else {
+    // Update last login
+    try {
+      await setDoc(userRef, { lastLogin: new Date() }, { merge: true });
+    } catch (error) {
+      console.error('Error updating last login:', error);
+    }
+  }
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setUser(user);
+      if (user) {
+        await createUserDocument(user);
+      }
       setLoading(false);
     });
 
@@ -39,7 +71,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      await createUserDocument(result.user);
     } catch (error) {
       console.error('Error signing in with Google:', error);
       throw error;
@@ -48,7 +81,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithEmail = async (email: string, password: string) => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      await createUserDocument(result.user);
     } catch (error) {
       console.error('Error signing in with email:', error);
       throw error;
@@ -57,7 +91,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUpWithEmail = async (email: string, password: string) => {
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      await createUserDocument(result.user);
     } catch (error) {
       console.error('Error signing up with email:', error);
       throw error;
