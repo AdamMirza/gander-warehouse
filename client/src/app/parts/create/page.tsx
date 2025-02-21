@@ -148,24 +148,18 @@ export default function CreateOrderPage() {
   // Function to fetch inventory for a selected part
   const fetchInventoryForPart = async (part: FirestorePart) => {
     try {
-      const inventoryPromises = part.inventoryIds.map(id => 
-        getDocs(query(
+      // Single query instead of multiple promises
+      const inventorySnapshot = await getDocs(
+        query(
           collection(db, 'inventory'),
           where('partId', '==', part.id)
-        ))
+        )
       );
 
-      const inventorySnapshots = await Promise.all(inventoryPromises);
-      const inventoryItems: InventoryItem[] = [];
-      
-      inventorySnapshots.forEach(snapshot => {
-        snapshot.docs.forEach(doc => {
-          inventoryItems.push({
-            id: doc.id,
-            ...doc.data()
-          } as InventoryItem);
-        });
-      });
+      const inventoryItems: InventoryItem[] = inventorySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as InventoryItem));
 
       setSelectedPartInventory(inventoryItems);
       
@@ -245,6 +239,19 @@ export default function CreateOrderPage() {
       );
     }
 
+    // Group inventory items by condition and sum their counts
+    const groupedInventory = selectedPartInventory.reduce<Record<string, { count: number, ids: string[] }>>(
+      (acc, item) => {
+        if (!acc[item.condition]) {
+          acc[item.condition] = { count: 0, ids: [] };
+        }
+        acc[item.condition].count += item.count;
+        acc[item.condition].ids.push(item.id);
+        return acc;
+      },
+      {}
+    );
+
     return (
       <select
         value={currentPart.condition}
@@ -253,9 +260,9 @@ export default function CreateOrderPage() {
         disabled={availableConditions.length === 0}
       >
         {availableConditions.length > 0 ? (
-          availableConditions.map((condition) => (
+          Object.entries(groupedInventory).map(([condition, data]) => (
             <option key={condition} value={condition}>
-              {condition} ({selectedPartInventory.find(inv => inv.condition === condition)?.count} available)
+              {condition} ({data.count} available)
             </option>
           ))
         ) : (
