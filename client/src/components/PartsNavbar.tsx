@@ -10,6 +10,11 @@ export default function PartsNavbar() {
 
   const isActive = (path: string) => pathname === path;
 
+  const navLinks = [
+    { href: '/parts/requisition', label: 'Submit Requisition' },
+    { href: '/parts/inventory', label: 'Parts Catalog' },
+  ];
+
   return (
     <nav className="fixed w-full top-0 z-50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-lg border-b border-slate-200 dark:border-slate-800">
       <div className="container mx-auto px-6">
@@ -24,42 +29,33 @@ export default function PartsNavbar() {
 
           {/* Main Navigation */}
           <div className="flex items-center gap-8">
-            <Link
-              href="/parts/requisition"
-              className={`relative py-2 text-sm font-medium transition-colors ${
-                isActive('/parts/requisition')
-                  ? 'text-blue-600 dark:text-blue-400'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400'
-              }`}
-            >
-              Submit Requisition
-              {isActive('/parts/requisition') && (
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
-              )}
-            </Link>
-            <Link
-              href="/parts/inventory"
-              className={`relative py-2 text-sm font-medium transition-colors ${
-                isActive('/parts/inventory')
-                  ? 'text-blue-600 dark:text-blue-400'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400'
-              }`}
-            >
-              Parts Catalog
-              {isActive('/parts/inventory') && (
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
-              )}
-            </Link>
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`relative py-2 text-sm font-medium transition-colors ${
+                  isActive(link.href)
+                    ? 'text-blue-600 dark:text-blue-400'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400'
+                }`}
+              >
+                {link.label}
+                {isActive(link.href) && (
+                  <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />
+                )}
+              </Link>
+            ))}
           </div>
 
           {/* Right side - Account/Logout */}
           <div className="ml-auto flex items-center gap-6">
-            <button
+            <Link
+              href="/"
               onClick={() => logout()}
               className="text-sm text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition-colors"
             >
               Sign Out
-            </button>
+            </Link>
           </div>
         </div>
       </div>

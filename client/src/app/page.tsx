@@ -6,13 +6,13 @@ export default function Home() {
       {/* Hero Section */}
       <section className="relative h-[90vh] flex items-center justify-center bg-gradient-to-r from-slate-900 to-slate-800">
         <div className="absolute inset-0 opacity-20">
-          <Image
+        <Image
             src="/warehouse-hero.jpg"
             alt="Warehouse interior"
             fill
             className="object-cover"
-            priority
-          />
+          priority
+        />
         </div>
         <div className="container mx-auto px-6 relative z-10 text-white">
           <div className="max-w-3xl">
@@ -100,7 +100,7 @@ export default function Home() {
               </button>
             </div>
             <div className="flex-1 relative h-[400px] w-full">
-              <Image
+            <Image
                 src="/dashboard-preview.jpg"
                 alt="Dashboard preview"
                 fill
