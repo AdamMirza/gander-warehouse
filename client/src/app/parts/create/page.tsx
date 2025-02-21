@@ -11,9 +11,15 @@ interface FirestorePart {
   name: string;
   description: string;
   manufacturer: string;
-  condition: string;
-  quantityAvailable: number;
+  inventoryIds: string[];
   image?: string;
+}
+
+interface InventoryItem {
+  id: string;
+  partId: string;
+  condition: string;
+  count: number;
 }
 
 interface Part {
@@ -81,6 +87,9 @@ export default function CreateOrderPage() {
   const [showDropdown, setShowDropdown] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const debouncedSearch = useDebounce(currentPart.partNumber, 300);
+  const [availableConditions, setAvailableConditions] = useState<string[]>([]);
+  const [selectedPartInventory, setSelectedPartInventory] = useState<InventoryItem[]>([]);
+  const [isCustomPart, setIsCustomPart] = useState(false);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -100,6 +109,7 @@ export default function CreateOrderPage() {
       if (!debouncedSearch.trim()) {
         setSearchResults([]);
         setIsSearching(false);
+        setIsCustomPart(false);
         return;
       }
 
@@ -120,6 +130,11 @@ export default function CreateOrderPage() {
         } as FirestorePart));
 
         setSearchResults(results);
+        const isCustom = results.length === 0 && debouncedSearch.trim() !== '';
+        setIsCustomPart(isCustom);
+        if (isCustom) {
+          setShowDropdown(false);
+        }
       } catch (error) {
         console.error('Error searching parts:', error);
       } finally {
@@ -130,11 +145,56 @@ export default function CreateOrderPage() {
     searchParts();
   }, [debouncedSearch]);
 
-  const handleSelectPart = (part: FirestorePart) => {
+  // Function to fetch inventory for a selected part
+  const fetchInventoryForPart = async (part: FirestorePart) => {
+    try {
+      const inventoryPromises = part.inventoryIds.map(id => 
+        getDocs(query(
+          collection(db, 'inventory'),
+          where('partId', '==', part.id)
+        ))
+      );
+
+      const inventorySnapshots = await Promise.all(inventoryPromises);
+      const inventoryItems: InventoryItem[] = [];
+      
+      inventorySnapshots.forEach(snapshot => {
+        snapshot.docs.forEach(doc => {
+          inventoryItems.push({
+            id: doc.id,
+            ...doc.data()
+          } as InventoryItem);
+        });
+      });
+
+      setSelectedPartInventory(inventoryItems);
+      
+      // Update available conditions based on inventory
+      const conditions = inventoryItems
+        .filter(item => item.count > 0) // Only show conditions with available stock
+        .map(item => item.condition);
+      setAvailableConditions(conditions);
+
+      // Reset condition if current selection is not available
+      if (!conditions.includes(currentPart.condition)) {
+        setCurrentPart(prev => ({
+          ...prev,
+          condition: conditions[0] || 'New' // Default to first available condition
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching inventory:', error);
+    }
+  };
+
+  // Update handleSelectPart to fetch inventory
+  const handleSelectPart = async (part: FirestorePart) => {
     setCurrentPart(prev => ({
       ...prev,
       partNumber: part.partNumber,
     }));
+    setIsCustomPart(false);
+    await fetchInventoryForPart(part);
     setShowDropdown(false);
   };
 
@@ -167,6 +227,68 @@ export default function CreateOrderPage() {
     console.log('Submitting order with parts:', parts);
   };
 
+  // Render the condition dropdown based on whether it's a custom part or not
+  const renderConditionDropdown = () => {
+    if (isCustomPart) {
+      return (
+        <select
+          value={currentPart.condition}
+          onChange={(e) => setCurrentPart({ ...currentPart, condition: e.target.value })}
+          className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800 appearance-none"
+        >
+          {CONDITIONS.map((condition) => (
+            <option key={condition} value={condition}>
+              {condition}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    return (
+      <select
+        value={currentPart.condition}
+        onChange={(e) => setCurrentPart({ ...currentPart, condition: e.target.value })}
+        className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800 appearance-none"
+        disabled={availableConditions.length === 0}
+      >
+        {availableConditions.length > 0 ? (
+          availableConditions.map((condition) => (
+            <option key={condition} value={condition}>
+              {condition} ({selectedPartInventory.find(inv => inv.condition === condition)?.count} available)
+            </option>
+          ))
+        ) : (
+          <option value="">No conditions available</option>
+        )}
+      </select>
+    );
+  };
+
+  // Render quantity input based on whether it's a custom part
+  const renderQuantityInput = () => {
+    const maxQuantity = isCustomPart ? 9999 : 
+      selectedPartInventory.find(inv => inv.condition === currentPart.condition)?.count || 1;
+
+    return (
+      <input
+        type="number"
+        min="1"
+        max={maxQuantity}
+        value={currentPart.quantity}
+        onChange={(e) => {
+          const value = parseInt(e.target.value);
+          if (value > maxQuantity) {
+            setCurrentPart(prev => ({ ...prev, quantity: maxQuantity }));
+          } else {
+            setCurrentPart(prev => ({ ...prev, quantity: value }));
+          }
+        }}
+        className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800"
+      />
+    );
+  };
+
   return (
     <div className="min-h-screen pt-24 px-6">
       <div className="container mx-auto max-w-4xl">
@@ -177,9 +299,29 @@ export default function CreateOrderPage() {
           <div className="space-y-4">
             {/* Part Number Search */}
             <div ref={searchRef} className="relative">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Part Number
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Part Number
+                </label>
+                {isCustomPart && (
+                  <span className="text-sm text-amber-600 dark:text-amber-400 flex items-center">
+                    <svg 
+                      className="w-4 h-4 mr-1" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                        strokeWidth="2" 
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
+                      />
+                    </svg>
+                    No matching parts found. You can still use this part number.
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
                 value={currentPart.partNumber}
@@ -193,7 +335,7 @@ export default function CreateOrderPage() {
               />
               
               {/* Search Results Dropdown */}
-              {showDropdown && (currentPart.partNumber || isSearching) && (
+              {showDropdown && (currentPart.partNumber || isSearching) && !isCustomPart && (
                 <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 max-h-64 overflow-y-auto">
                   {isSearching ? (
                     <div className="p-4 text-center text-slate-500 dark:text-slate-400">
@@ -228,10 +370,6 @@ export default function CreateOrderPage() {
                         </div>
                       </button>
                     ))
-                  ) : currentPart.partNumber ? (
-                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
-                      No matching parts found. You can still use this part number.
-                    </div>
                   ) : (
                     <div className="p-4 text-center text-slate-500 dark:text-slate-400">
                       Start typing to search for parts
@@ -269,17 +407,7 @@ export default function CreateOrderPage() {
                     Condition
                   </label>
                   <div className="relative">
-                    <select
-                      value={currentPart.condition}
-                      onChange={(e) => setCurrentPart({ ...currentPart, condition: e.target.value })}
-                      className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800 appearance-none"
-                    >
-                      {CONDITIONS.map((condition) => (
-                        <option key={condition} value={condition}>
-                          {condition}
-                        </option>
-                      ))}
-                    </select>
+                    {renderConditionDropdown()}
                     <SelectArrowIcon />
                   </div>
                 </div>
@@ -287,13 +415,7 @@ export default function CreateOrderPage() {
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Quantity
                   </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={currentPart.quantity}
-                    onChange={(e) => setCurrentPart({ ...currentPart, quantity: parseInt(e.target.value) })}
-                    className="w-full px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-800"
-                  />
+                  {renderQuantityInput()}
                 </div>
               </div>
             </div>
