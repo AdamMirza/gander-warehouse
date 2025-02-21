@@ -17,7 +17,7 @@
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: var(--font-geist-sans), Arial, sans-serif;
+  font-family: 'Satoshi', system-ui, sans-serif;
 }
 
 .container {
