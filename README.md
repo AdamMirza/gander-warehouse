@@ -22,6 +22,11 @@ This monorepo contains both the client and warehouse portals for the Gander Ware
    
    From the root directory, run:
    ```bash
+   npm install
+   ```
+   Then run the following command to install dependencies for all applications:
+
+   ```bash
    npm run install-all
    ```
    This will install dependencies for both the client and warehouse applications, as well as root dependencies.
